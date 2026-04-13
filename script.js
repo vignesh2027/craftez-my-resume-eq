@@ -891,13 +891,17 @@ async function updatePreview() {
 
 async function renderPreview() {
   const template = uiSettings.atsMode ? "ats-friendly" : uiSettings.template
-  const templatePath = `templates/${template}.html`
+  const templatePath = `/templates/${template}.html`
 
   try {
-    const response = await fetch(templatePath)
+    const response = await fetch(templatePath, {
+      method: 'GET',
+      cache: 'no-cache'
+    })
     if (!response.ok) {
+      console.warn(`[v0] Template ${template} not found, using fallback`)
       // Fallback to modern template if template not found
-      const fallbackResponse = await fetch("templates/modern.html")
+      const fallbackResponse = await fetch("/templates/modern.html")
       if (!fallbackResponse.ok) throw new Error(`Template not found: ${templatePath}`)
       const templateHtml = await fallbackResponse.text()
 
@@ -1494,6 +1498,157 @@ function getScoreClass(score) {
   if (score >= 60) return "good"
   if (score >= 40) return "fair"
   return "poor"
+}
+
+// --- ADVANCED RESUME ANALYSIS WITH AI DETECTION ---
+const POWER_KEYWORDS = {
+  leadership: ["led", "managed", "directed", "oversaw", "orchestrated", "spearheaded", "champion", "pioneered"],
+  achievement: ["increased", "improved", "boosted", "enhanced", "maximized", "optimized", "accelerated", "expanded", "scaled"],
+  technical: ["developed", "implemented", "designed", "architected", "engineered", "deployed", "built", "created", "integrated"],
+  impact: ["reduced", "minimized", "decreased", "lowered", "eliminated", "streamlined", "simplified", "automated"],
+  quantifiable: ["25%", "50%", "100%", "$", "revenue", "cost", "time", "efficiency", "performance"],
+  softSkills: ["communication", "collaboration", "teamwork", "problem-solving", "critical thinking", "adaptability", "leadership", "mentorship"],
+  aiGenerated: ["in today's", "cutting-edge", "leveraging", "unlock potential", "game-changer", "synergy", "innovative approach", "paradigm shift"]
+}
+
+const WEAK_KEYWORDS = ["responsible for", "worked on", "assisted with", "involved in", "participated", "helped"]
+
+function analyzeResume() {
+  collectDataFromForm()
+  
+  const analysis = {
+    powerKeywords: 0,
+    weakKeywords: 0,
+    quantifiableAchievements: 0,
+    bulletPoints: 0,
+    totalWords: 0,
+    aiDetectionScore: 0,
+    keywordMatches: [],
+    recommendations: [],
+    overallScore: 0
+  }
+
+  const allText = `${resumeData.personal.summary} ${resumeData.experience.map(e => e.description).join(" ")} ${resumeData.additional.projects}`.toLowerCase()
+  
+  // Count power keywords
+  Object.entries(POWER_KEYWORDS).forEach(([category, keywords]) => {
+    keywords.forEach(keyword => {
+      const count = (allText.match(new RegExp(`\\b${keyword}\\b`, "g")) || []).length
+      if (count > 0) {
+        analysis.powerKeywords += count
+        analysis.keywordMatches.push(`${keyword} (${count}x)`)
+      }
+    })
+  })
+
+  // Count weak keywords
+  WEAK_KEYWORDS.forEach(keyword => {
+    const count = (allText.match(new RegExp(`\\b${keyword}\\b`, "g")) || []).length
+    if (count > 0) {
+      analysis.weakKeywords += count
+      analysis.recommendations.push(`Replace "${keyword}" with stronger action verbs`)
+    }
+  })
+
+  // Count quantifiable achievements
+  const numbers = allText.match(/\d+%|\$\d+|\d+\+/g) || []
+  analysis.quantifiableAchievements = numbers.length
+
+  // Count bullet points
+  analysis.bulletPoints = (resumeData.experience[0]?.description.match(/•|•|·/g) || []).length
+
+  // Count total words
+  analysis.totalWords = allText.split(/\s+/).filter(w => w.length > 0).length
+
+  // AI Detection Score (0-100, lower is better - more original)
+  let aiScore = 0
+  POWER_KEYWORDS.aiGenerated.forEach(phrase => {
+    if (allText.includes(phrase)) aiScore += 15
+  })
+  
+  // Check for repetitive patterns
+  const sentences = allText.split(/[.!?]+/).filter(s => s.trim())
+  const uniqueSentences = new Set(sentences.map(s => s.trim().substring(0, 30)))
+  if (sentences.length > 0) {
+    aiScore += Math.max(0, Math.min(20, 100 - (uniqueSentences.size / sentences.length * 100)))
+  }
+
+  analysis.aiDetectionScore = Math.round(aiScore)
+
+  // Generate recommendations
+  if (analysis.quantifiableAchievements < 3) {
+    analysis.recommendations.push("Add 3+ quantifiable metrics to achievements")
+  }
+  if (analysis.weakKeywords > analysis.powerKeywords / 2) {
+    analysis.recommendations.push("Replace passive language with action verbs")
+  }
+  if (analysis.totalWords < 200) {
+    analysis.recommendations.push("Add more detail to professional experience")
+  }
+  if (analysis.aiDetectionScore > 30) {
+    analysis.recommendations.push("Add more specific, unique accomplishments to sound more authentic")
+  }
+
+  // Calculate overall score
+  analysis.overallScore = Math.min(100, 
+    (analysis.powerKeywords * 5) + 
+    (analysis.quantifiableAchievements * 8) - 
+    (analysis.weakKeywords * 3) + 
+    (100 - analysis.aiDetectionScore) * 0.3
+  )
+
+  showAnalysisModal(analysis)
+}
+
+function showAnalysisModal(analysis) {
+  const modal = document.createElement("div")
+  modal.className = "analysis-modal"
+  modal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Resume Analysis Report</h2>
+        <button class="btn-close" onclick="this.closest('.analysis-modal').remove()">&times;</button>
+      </div>
+      <div class="analysis-grid">
+        <div class="analysis-card">
+          <div class="card-title">Overall Score</div>
+          <div class="score-large">${Math.round(analysis.overallScore)}/100</div>
+          <p class="card-description">Resume strength rating</p>
+        </div>
+        <div class="analysis-card">
+          <div class="card-title">Power Keywords</div>
+          <div class="score-large">${analysis.powerKeywords}</div>
+          <p class="card-description">Strong action verbs found</p>
+        </div>
+        <div class="analysis-card">
+          <div class="card-title">AI Detection</div>
+          <div class="score-large ${analysis.aiDetectionScore < 30 ? 'low' : 'high'}">${analysis.aiDetectionScore}%</div>
+          <p class="card-description">Originality score (lower is better)</p>
+        </div>
+        <div class="analysis-card">
+          <div class="card-title">Metrics</div>
+          <div class="score-large">${analysis.quantifiableAchievements}</div>
+          <p class="card-description">Quantifiable results found</p>
+        </div>
+      </div>
+      <div class="recommendations">
+        <h3>Recommendations</h3>
+        <ul>
+          ${analysis.recommendations.length > 0 
+            ? analysis.recommendations.map(r => `<li>✓ ${r}</li>`).join("")
+            : "<li>✓ Your resume looks great!</li>"
+          }
+        </ul>
+      </div>
+      <div class="keyword-matches">
+        <h3>Detected Keywords (${analysis.keywordMatches.length})</h3>
+        <div class="keywords-list">
+          ${analysis.keywordMatches.slice(0, 10).map(k => `<span class="keyword-badge">${k}</span>`).join("")}
+        </div>
+      </div>
+    </div>
+  `
+  document.body.appendChild(modal)
 }
 
 // --- AUTO-SAVE FUNCTIONALITY ---
